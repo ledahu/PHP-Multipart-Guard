@@ -1,0 +1,10 @@
+
+# =====================================================================
+# Exécution PHP via mod_proxy_fcgi -> serveur FastCGI séparé (type FPM)
+# (ProxyFCGISetEnvIf : php-cgi, contrairement à PHP-FPM, ne sait pas lire
+#  un SCRIPT_FILENAME préfixé par "proxy:fcgi://...")
+# =====================================================================
+<FilesMatch "\.php$">
+    SetHandler "proxy:fcgi://127.0.0.1:9074/"
+</FilesMatch>
+ProxyFCGISetEnvIf "true" SCRIPT_FILENAME "C:/wamp64/www%{reqenv:SCRIPT_NAME}"

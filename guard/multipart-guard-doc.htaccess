@@ -1,0 +1,207 @@
+# =====================================================================
+#  MULTIPART GUARD — documented edition
+#
+#  Same rules as multipart-guard.htaccess, with every explanation.
+#  For copy-paste, prefer multipart-guard.htaccess (short comments only).
+#
+#  Blocks file-upload requests (multipart/form-data) on every URL of the
+#  site, except the URLs you allow below. Blocked requests never reach PHP.
+#  Also limits POST bodies below PHP's post_max_size.
+#
+#  This reduces the risk from PHP bugs in upload parsing (for example
+#  CVE-2026-109618). It is NOT a fix: update PHP as soon as you can.
+#
+#  HOW TO USE
+#  - Put this whole block at the TOP of the site's main .htaccess file
+#    (or inside <Location "/"> in the VirtualHost, see README).
+#  - Edit only the SETTINGS section.
+#  - Needs Apache 2.4 with mod_setenvif (enabled by default).
+#
+#  WHERE IT WORKS
+#  - mod_php, mod_fcgid, PHP-FPM with "SetHandler proxy:fcgi://...":
+#    .htaccess or VirtualHost.
+#  - PHP-FPM with "ProxyPassMatch": .htaccess files are NEVER read. Put
+#    this block inside <Location "/"> of each VirtualHost instead.
+# =====================================================================
+
+
+# ---------------------------------------------------------------------
+#  SETTINGS
+# ---------------------------------------------------------------------
+
+# 1. MODE
+#
+#    BLOCK   (default)  Forbidden uploads get "403 Forbidden".
+#    OBSERVE            Decisions are only logged. LimitRequestBody stays active.
+#
+#    Start with OBSERVE for a few days to find the upload URLs your site
+#    really uses. To turn OBSERVE on, remove the "#" at the start of the
+#    next line. To go back to BLOCK, put the "#" back.
+#
+#SetEnvIf Request_URI ^ MPG_OBSERVE=1
+
+
+# 2. MAXIMUM POST SIZE (in bytes, digits only)
+#
+#    In BLOCK mode, POST requests with a declared size above this limit
+#    are refused before PHP runs: uploads, normal forms, JSON, etc.
+#    Chunked POST bodies are limited as they are read; the tested FastCGI
+#    setups may pass a truncated body to PHP. This limit stays in OBSERVE.
+#    PUT and PATCH are not affected.
+#
+#    Use PHP's "post_max_size" MINUS 64 KB, and put the SAME NUMBER on
+#    the two lines below.
+#
+#    Why: PHP then never sees a POST body bigger than post_max_size, so it
+#    never writes its "POST Content-Length exceeds the limit" warning. That
+#    warning happens before your script runs, and early warnings like this
+#    one are part of the CVE-2026-109619 attack path. The 64 KB margin is
+#    needed for bodies sent without a declared size ("chunked"): Apache
+#    stops them a few KB after the limit (up to 8 KB measured, mod_fcgid).
+#
+#        post_max_size = 2M    ->   2031616     post_max_size = 20M   ->  20905984
+#        post_max_size = 8M    ->   8323072     post_max_size = 50M   ->  52363264
+#        post_max_size = 10M   ->  10420224     post_max_size = 100M  -> 104792064
+#
+#    (PHP's "M" = 1048576 bytes. Formula: M x 1048576 - 65536.)
+#    If several PHP versions or pools serve this site, use the smallest.
+#
+#    Line 1: checks the declared size (Content-Length), before PHP runs.
+SetEnvIf Request_URI ^ MPG_MAX_BYTES=8323072
+#    Line 2: limits POST bodies without a declared size ("chunked"):
+#    413 with mod_php, or a truncated body with the tested FastCGI setups.
+<If "%{REQUEST_METHOD} == 'POST'">
+    LimitRequestBody 8323072
+</If>
+
+
+# 3. ALLOWED UPLOAD URLS
+#
+#    One line per URL. Copy a line and change only the text between the
+#    single quotes '...'.
+#
+#    How to write a URL:
+#    - Write the path only, starting with "/". No domain, no "?query".
+#        https://example.org/blog/upload.php?id=3   ->   '/blog/upload.php'
+#    - It must match exactly. No wildcards.
+#    - Upper/lower case matters:  '/Upload.php' is not '/upload.php'.
+#    - A final "/" matters:       '/api/upload' is not '/api/upload/'.
+#    - If the site lives in a sub-folder, include it: '/blog/upload.php'.
+#    - Use the URL the browser sends (the form "action" or the upload
+#      request seen in the browser's developer tools), even if the site
+#      rewrites it internally to index.php.
+#
+#    Good habits:
+#    - Allow as few URLs as possible.
+#    - Only allow a URL if you know it is a real upload form. Never allow
+#      a URL just because it appears in the log: attackers can put it there.
+#    - A missing URL only breaks that one upload form (403). It never
+#      weakens the protection.
+#
+#    With no allowed URL (the default), every upload is blocked.
+#
+#    WORDPRESS
+#    Checked in the WordPress 7.1 source code. Remove the "#" on the lines
+#    you need. If WordPress is in a sub-folder, add it in front of every
+#    path ('/blog/wp-admin/async-upload.php').
+#
+#    Needed on almost every site:
+#      Media Library uploads (wp-includes/media.php)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/async-upload.php'"  MPG_ALLOWED=1
+#      Block editor uploads, REST API (wp-includes/js/dist/media-utils.js)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-json/wp/v2/media'"  MPG_ALLOWED=1
+#      Block editor, extra image sizes made in the browser (same file)
+#SetEnvIfExpr "%{REQUEST_URI} =~ m#^/wp-json/wp/v2/media/[0-9]+/sideload$#"  MPG_ALLOWED=1
+#      Saving menus, Appearance > Menus, classic themes (wp-admin/nav-menus.php)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/nav-menus.php'"  MPG_ALLOWED=1
+#
+#    Only if you use these admin screens:
+#      Upload a plugin or theme ZIP (Plugins/Themes > Add New > Upload)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/update.php'"  MPG_ALLOWED=1
+#      Media > Add New, "browser uploader" fallback
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/media-new.php'"  MPG_ALLOWED=1
+#      Old media pop-up (media-upload.php)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/media-upload.php'"  MPG_ALLOWED=1
+#      Custom header / background image, classic themes
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/themes.php'"  MPG_ALLOWED=1
+#      Tools > Import (file importers). admin.php is used by every plugin
+#      settings page: allow it only while you import.
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/admin.php'"  MPG_ALLOWED=1
+#      Multisite: Network Admin > Sites > Add New
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/network/site-new.php'"  MPG_ALLOWED=1
+#
+#    Permalink setting changes the REST API URL (Settings > Permalinks):
+#      "Plain" permalinks: REST goes to /index.php?rest_route=/wp/v2/media.
+#      Use this line INSTEAD of the two '/wp-json/...' lines above:
+#SetEnvIfExpr "%{REQUEST_URI} == '/index.php' && %{QUERY_STRING} =~ m#^rest_route=/wp/v2/media(/[0-9]+/sideload)?(&|$)#"  MPG_ALLOWED=1
+#      Permalinks with "/index.php/" in them: prefix the REST paths with
+#      '/index.php' ('/index.php/wp-json/wp/v2/media').
+#
+#    Plugins with front-end upload forms (contact forms, job boards...)
+#    use their own URLs: find them with OBSERVE mode. Examples:
+#      Contact Form 7: '/wp-json/contact-form-7/v1/contact-forms/<id>/feedback'
+#      Many plugins:   '/wp-admin/admin-ajax.php' (used by all AJAX calls,
+#                      including anonymous visitors: allow only if needed)
+#      Some plugins post to the page itself: allow that page's URL.
+#
+#    Note: allowing a wp-admin URL does not require a login to reach PHP's
+#    upload parser. PHP parses the upload before WordPress checks the
+#    login. Protect /wp-admin/ by IP address or password if you can.
+
+#    Advanced, use with care: a regular expression, for URLs that contain
+#    a variable part. Always start with ^ and end with $.
+#SetEnvIfExpr "%{REQUEST_URI} =~ m#^/api/items/[0-9]+/upload$#"  MPG_ALLOWED=1
+
+
+# ---------------------------------------------------------------------
+#  ENGINE — do not edit below this line
+# ---------------------------------------------------------------------
+#
+#  The variable MPG holds the decision. It is written to the log
+#  (see apache/multipart-guard-log.conf) and is visible to PHP.
+
+# Step 1. Is this an upload request?
+# "multipart" anywhere in Content-Type, any case. PHP also accepts odd
+# forms such as "multipart/form-data,x", so detection is kept wide.
+# Only the original request is checked, not internal redirects.
+SetEnvIfExpr "-z %{ENV:REDIRECT_STATUS} && %{HTTP:Content-Type} =~ /multipart/i" MPG=seen
+
+# Step 2. Decide. The first rule that matches sets the reason.
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && -z %{ENV:MPG_ALLOWED}" MPG=deny_not_allowed
+
+# On an allowed URL, accept only what a real browser sends:
+# - the POST method;
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && %{REQUEST_METHOD} != 'POST'" MPG=deny_method
+
+# - one clean header "multipart/form-data; boundary=..." (no duplicate
+#   header, no extra parameter, no comma, quotes absent or paired);
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && ! %{HTTP:Content-Type} =~ m#^multipart/form-data; ?boundary=(?:\"[0-9A-Za-z'()+_./:=?-]{1,70}\"|[0-9A-Za-z'()+_./:=?-]{1,70})$#i" MPG=deny_bad_ctype
+
+# - a Content-Length header (no "chunked" body of unknown size);
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && ! %{HTTP:Content-Length} =~ /^[0-9]{1,15}$/" MPG=deny_no_length
+
+# - a size within the limit. Apache never passes more than Content-Length
+#   bytes to PHP, so PHP cannot receive more than this.
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && %{HTTP:Content-Length} -gt %{ENV:MPG_MAX_BYTES}" MPG=deny_too_large
+
+SetEnvIfExpr "%{ENV:MPG} == 'seen'" MPG=allow
+
+# Step 3. Any other POST (form, JSON...) bigger than the limit.
+# Skipped if MPG_MAX_BYTES is not a plain number, so a typo cannot block
+# every form of the site (uploads stay blocked in that case, see above).
+SetEnvIfExpr "-z %{ENV:MPG} && -z %{ENV:REDIRECT_STATUS} && %{REQUEST_METHOD} == 'POST' && %{ENV:MPG_MAX_BYTES} =~ /^[0-9]+$/ && %{HTTP:Content-Length} =~ /^[0-9]{1,15}$/ && %{HTTP:Content-Length} -gt %{ENV:MPG_MAX_BYTES}" MPG=deny_too_large
+
+# Step 4. Enforce.
+# <If> only selects the requests to check (it runs before the SetEnvIf
+# lines above). The decision itself is the "Require expr" line, checked
+# later, before PHP runs. "AuthMerging And" keeps the site's own access
+# rules. An internal redirect of a refused request (for example an
+# ErrorDocument pointing to a PHP script) is refused too.
+<If "%{HTTP:Content-Type} =~ /multipart/i || %{REQUEST_METHOD} == 'POST' || -n %{ENV:REDIRECT_MPG}">
+    AuthMerging And
+    Require expr "-n %{ENV:MPG_OBSERVE} || -n %{ENV:REDIRECT_MPG_OBSERVE} || (%{ENV:MPG} !~ /^deny/ && %{ENV:REDIRECT_MPG} !~ /^deny/)"
+</If>
+
+# =====================================================================
+#  END OF MULTIPART GUARD
+# =====================================================================

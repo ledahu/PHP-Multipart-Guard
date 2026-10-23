@@ -1,0 +1,5 @@
+# Unix line endings everywhere (Apache and bash files are used on Linux too)
+* text=auto eol=lf
+
+# Exact bytes matter: multipart test body with CRLF line endings
+*.bin binary

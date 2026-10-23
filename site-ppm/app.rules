@@ -1,0 +1,11 @@
+
+# =====================================================================
+# Application simulée (indépendante de Multipart Guard)
+# =====================================================================
+
+# Contrôleur frontal façon WordPress : toute URL inexistante -> index.php
+RewriteEngine On
+RewriteBase /multipart2hell/site/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . index.php [L]

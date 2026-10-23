@@ -1,0 +1,44 @@
+# ===== MULTIPART GUARD =====
+# Blocks uploads except on allowed URLs, and POST bodies bigger than PHP's limit.
+# Put at the TOP of .htaccess. Edit only SETTINGS. Help: multipart-guard-doc.htaccess
+# PHP-FPM via ProxyPassMatch ignores .htaccess: put this in <Location "/"> of the VirtualHost.
+
+# ----- SETTINGS -----
+
+# Mode: remove the "#" to OBSERVE decisions. LimitRequestBody stays active.
+#SetEnvIf Request_URI ^ MPG_OBSERVE=1
+
+# Max POST size in bytes = post_max_size - 65536 (8M -> 8323072). Same number twice.
+SetEnvIf Request_URI ^ MPG_MAX_BYTES=8323072
+<If "%{REQUEST_METHOD} == 'POST'">
+    LimitRequestBody 8323072
+</If>
+
+# Allowed upload URLs, one per line: exact path from "/", case-sensitive, no ?query.
+# WordPress at the domain root with pretty permalinks (other cases: doc file).
+# Remove the "#" on the lines you need.
+#   Media Library
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/async-upload.php'"  MPG_ALLOWED=1
+#   Block editor
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-json/wp/v2/media'"  MPG_ALLOWED=1
+#SetEnvIfExpr "%{REQUEST_URI} =~ m#^/wp-json/wp/v2/media/[0-9]+/sideload$#"  MPG_ALLOWED=1
+#   Saving menus (classic themes)
+#SetEnvIfExpr "%{REQUEST_URI} == '/wp-admin/nav-menus.php'"  MPG_ALLOWED=1
+
+# ----- ENGINE (do not edit) -----
+
+SetEnvIfExpr "-z %{ENV:REDIRECT_STATUS} && %{HTTP:Content-Type} =~ /multipart/i" MPG=seen
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && -z %{ENV:MPG_ALLOWED}" MPG=deny_not_allowed
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && %{REQUEST_METHOD} != 'POST'" MPG=deny_method
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && ! %{HTTP:Content-Type} =~ m#^multipart/form-data; ?boundary=(?:\"[0-9A-Za-z'()+_./:=?-]{1,70}\"|[0-9A-Za-z'()+_./:=?-]{1,70})$#i" MPG=deny_bad_ctype
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && ! %{HTTP:Content-Length} =~ /^[0-9]{1,15}$/" MPG=deny_no_length
+SetEnvIfExpr "%{ENV:MPG} == 'seen' && %{HTTP:Content-Length} -gt %{ENV:MPG_MAX_BYTES}" MPG=deny_too_large
+SetEnvIfExpr "%{ENV:MPG} == 'seen'" MPG=allow
+SetEnvIfExpr "-z %{ENV:MPG} && -z %{ENV:REDIRECT_STATUS} && %{REQUEST_METHOD} == 'POST' && %{ENV:MPG_MAX_BYTES} =~ /^[0-9]+$/ && %{HTTP:Content-Length} =~ /^[0-9]{1,15}$/ && %{HTTP:Content-Length} -gt %{ENV:MPG_MAX_BYTES}" MPG=deny_too_large
+
+<If "%{HTTP:Content-Type} =~ /multipart/i || %{REQUEST_METHOD} == 'POST' || -n %{ENV:REDIRECT_MPG}">
+    AuthMerging And
+    Require expr "-n %{ENV:MPG_OBSERVE} || -n %{ENV:REDIRECT_MPG_OBSERVE} || (%{ENV:MPG} !~ /^deny/ && %{ENV:REDIRECT_MPG} !~ /^deny/)"
+</If>
+
+# ===== END MULTIPART GUARD =====

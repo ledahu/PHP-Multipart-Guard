@@ -1,0 +1,3 @@
+RewriteEngine On
+RewriteRule ^legacy$ page.php [L]
+ErrorDocument 403 /multipart2hell/site/errdoc.php

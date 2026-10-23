@@ -1,0 +1,9 @@
+
+# =====================================================================
+# Exécution PHP via mod_fcgid + php-cgi 7.4 (au lieu de mod_php)
+# =====================================================================
+<FilesMatch "\.php$">
+    Options +ExecCGI
+    SetHandler fcgid-script
+    FcgidWrapper "C:/wamp64/bin/php/php7.4.33/php-cgi.exe" .php
+</FilesMatch>
